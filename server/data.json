@@ -1,0 +1,8 @@
+{
+  "overlays": [],
+  "settings": {
+    "rtspUrl": "rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4",
+    "volume": "1",
+    "autoplay": false
+  }
+}
