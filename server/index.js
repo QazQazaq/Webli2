@@ -50,9 +50,44 @@ let streamState = {
 // Check if FFmpeg is available
 const checkFFmpeg = () => {
   return new Promise((resolve) => {
-    const ffmpeg = spawn('ffmpeg', ['-version']);
-    ffmpeg.on('error', () => resolve(false));
-    ffmpeg.on('close', (code) => resolve(code === 0));
+    try {
+      const ffmpeg = spawn('ffmpeg', ['-version'], { 
+        stdio: 'pipe',
+        timeout: 5000 
+      });
+      
+      let hasOutput = false;
+      
+      ffmpeg.stdout.on('data', (data) => {
+        hasOutput = true;
+        console.log('FFmpeg version check output:', data.toString());
+      });
+      
+      ffmpeg.stderr.on('data', (data) => {
+        hasOutput = true;
+        console.log('FFmpeg version check stderr:', data.toString());
+      });
+      
+      ffmpeg.on('error', (error) => {
+        console.log('FFmpeg spawn error:', error.message);
+        resolve(false);
+      });
+      
+      ffmpeg.on('close', (code) => {
+        console.log(`FFmpeg version check exited with code: ${code}`);
+        resolve(code === 0 && hasOutput);
+      });
+      
+      // Timeout fallback
+      setTimeout(() => {
+        ffmpeg.kill('SIGTERM');
+        resolve(false);
+      }, 5000);
+      
+    } catch (error) {
+      console.log('FFmpeg check exception:', error.message);
+      resolve(false);
+    }
   });
 };
 
@@ -67,32 +102,8 @@ checkFFmpeg().then(hasFFmpeg => {
 
 const startRTSPStream = (rtspUrl) => {
   if (!streamState.hasFFmpeg) {
-    // Mock stream start - in WebContainer, we can't run FFmpeg
-    streamState = {
-      ...streamState,
-      isRunning: true,
-      rtspUrl: rtspUrl,
-      startTime: new Date().toISOString()
-    };
-    
-    // Create a mock HLS playlist for demonstration
-    const mockPlaylist = `#EXTM3U
-#EXT-X-VERSION:3
-#EXT-X-TARGETDURATION:2
-#EXT-X-MEDIA-SEQUENCE:0
-#EXTINF:2.0,
-segment0.ts
-#EXTINF:2.0,
-segment1.ts
-#EXTINF:2.0,
-segment2.ts
-#EXT-X-ENDLIST`;
-    
-    const playlistPath = join(HLS_DIR, 'stream.m3u8');
-    fs.writeFileSync(playlistPath, mockPlaylist);
-    
-    console.log(`Mock RTSP stream started for: ${rtspUrl}`);
-    throw new Error('FFmpeg not available in WebContainer environment');
+    console.log('FFmpeg not available - cannot process RTSP streams');
+    throw new Error('FFmpeg not available. RTSP streaming requires FFmpeg for web browser compatibility. This environment does not support native binary execution.');
   }
 
   // Stop existing stream if running
@@ -120,7 +131,11 @@ segment2.ts
 
     console.log(`Starting FFmpeg with args: ${ffmpegArgs.join(' ')}`);
     
-    const ffmpeg = spawn('ffmpeg', ffmpegArgs);
+    const ffmpeg = spawn('ffmpeg', ffmpegArgs, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env }
+    });
+    
     streamState.ffmpegProcess = ffmpeg;
     streamState.isRunning = true;
     streamState.rtspUrl = rtspUrl;
@@ -142,6 +157,12 @@ segment2.ts
 
     ffmpeg.on('error', (error) => {
       console.error('FFmpeg error:', error);
+      console.error('FFmpeg error details:', {
+        code: error.code,
+        errno: error.errno,
+        syscall: error.syscall,
+        path: error.path
+      });
       streamState.isRunning = false;
       streamState.ffmpegProcess = null;
       reject(error);
@@ -153,7 +174,7 @@ segment2.ts
       streamState.ffmpegProcess = null;
       
       if (code !== 0 && code !== null) {
-        reject(new Error(`FFmpeg exited with code ${code}`));
+        reject(new Error(`FFmpeg process failed with exit code ${code}. This may indicate the environment doesn't support FFmpeg execution or the RTSP stream is inaccessible.`));
       }
     });
 
@@ -162,7 +183,7 @@ segment2.ts
       if (streamState.isRunning) {
         resolve(outputPath);
       } else {
-        reject(new Error('FFmpeg failed to start'));
+        reject(new Error('FFmpeg failed to start within timeout period. This environment may not support native binary execution.'));
       }
     }, 3000);
   });
@@ -215,36 +236,55 @@ app.post('/api/stream/start', (req, res) => {
     if (!streamState.hasFFmpeg) {
       return res.status(500).json({ 
         error: 'FFmpeg not available',
-        note: 'FFmpeg not available in WebContainer environment. RTSP streaming requires FFmpeg for web compatibility.',
+        note: 'FFmpeg is not available or cannot be executed in this environment. RTSP streaming requires FFmpeg to convert streams to web-compatible HLS format. This commonly occurs in containerized environments, GitHub Codespaces, or other sandboxed environments that restrict native binary execution.',
+        suggestions: [
+          'Deploy to a VPS or dedicated server with FFmpeg installed',
+          'Use Docker with FFmpeg support',
+          'Try a different hosting environment that supports native binaries',
+          'Use pre-converted HLS streams instead of RTSP'
+        ],
         mode: 'demo'
       });
     }
     
-    try {
-      const hlsPath = startRTSPStream(rtspUrl);
+    startRTSPStream(rtspUrl)
+      .then((hlsPath) => {
       res.json({
         message: 'RTSP stream conversion started',
         hlsUrl: `http://localhost:${PORT}/hls/stream.m3u8`,
         rtspUrl: rtspUrl,
         mode: 'production'
       });
-    } catch (error) {
+      })
+      .catch((error) => {
       console.error('Stream start error:', error);
       
-      if (error.message.includes('FFmpeg not available')) {
+      if (error.message.includes('not available') || error.message.includes('not support')) {
         res.status(500).json({ 
           error: 'FFmpeg not available',
-          note: 'FFmpeg not available in WebContainer environment. RTSP streaming requires FFmpeg for web compatibility.',
+          note: 'FFmpeg cannot be executed in this environment. This is common in containerized or sandboxed environments.',
+          details: error.message,
+          suggestions: [
+            'Deploy to a VPS with FFmpeg support',
+            'Use Docker with proper FFmpeg installation',
+            'Check if the environment allows native binary execution'
+          ],
           mode: 'demo'
         });
       } else {
         res.status(500).json({ 
           error: 'Failed to start RTSP stream conversion',
           details: error.message,
-          rtspUrl: rtspUrl
+          rtspUrl: rtspUrl,
+          troubleshooting: [
+            'Verify RTSP URL is accessible',
+            'Check network connectivity',
+            'Ensure FFmpeg has proper permissions',
+            'Try a different RTSP source'
+          ]
         });
       }
-    }
+      });
   } catch (error) {
     console.error('Stream start error:', error);
     res.status(500).json({ 

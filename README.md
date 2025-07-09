@@ -25,10 +25,25 @@ A professional RTSP livestream application with custom overlay management, built
   - **Windows**: Download from https://ffmpeg.org/download.html
   - **macOS**: `brew install ffmpeg`
   - **Linux**: `sudo apt install ffmpeg` or equivalent
-  - **WebContainer/Development**: Cannot run FFmpeg - will show demo mode warning
+  - **Containerized Environments**: May not support FFmpeg execution due to security restrictions
 
-**IMPORTANT**: This application is designed for RTSP streaming. Without FFmpeg, it cannot convert RTSP streams to web-compatible formats and will only show demo videos.
+**IMPORTANT**: This application requires FFmpeg to convert RTSP streams to web-compatible HLS format. Many containerized environments (GitHub Codespaces, some Docker containers, WebContainers) restrict native binary execution, preventing FFmpeg from running even if installed.
 
+### Environment Compatibility
+
+**✅ Fully Supported:**
+- Local development machines with FFmpeg installed
+- VPS/Dedicated servers with FFmpeg
+- Docker containers with proper FFmpeg setup and execution permissions
+- Cloud instances (AWS EC2, Google Compute, etc.) with FFmpeg
+
+**⚠️ Limited Support (Demo Mode Only):**
+- GitHub Codespaces (security restrictions)
+- WebContainer environments
+- Sandboxed development environments
+- Some Docker configurations with restricted execution
+
+**For production RTSP streaming, deploy to an environment that supports native binary execution.**
 ## Installation
 
 1. Install dependencies:

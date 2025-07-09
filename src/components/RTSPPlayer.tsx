@@ -75,35 +75,52 @@ const RTSPPlayer: React.FC<RTSPPlayerProps> = ({
       
       // Try to start stream via API
       const { startStream } = await import('../services/api');
-      const data = await startStream(rtspUrl);
+      try {
+        const data = await startStream(rtspUrl);
       
-      // Check if FFmpeg is available
-      if (data.mode === 'demo' || (data.note && data.note.includes('not available'))) {
+        // Check if FFmpeg is available
+        if (data.mode === 'demo' || (data.note && data.note.includes('not available'))) {
+          setStreamMode('demo');
+          setError(`RTSP streaming not supported: ${data.note}`);
+          setTimeout(() => {
+            loadDemoStream();
+          }, 2000);
+          return;
+        }
+        
+        setStreamMode('hls');
+        
+        // Wait for stream conversion to initialize
+        setTimeout(() => {
+          loadHLSStream(data.hlsUrl);
+        }, 3000);
+        
+      } catch (apiError) {
+        console.error('Stream API error:', apiError);
         setStreamMode('demo');
-        setError('Backend server or FFmpeg not available. Running in demo mode.');
+        
+        if (apiError.response?.data?.suggestions) {
+          setError(`RTSP streaming failed: ${apiError.response.data.error}. ${apiError.response.data.note}`);
+        } else {
+          setError(`RTSP streaming failed: ${apiError.message || 'Unknown error'}`);
+        }
+        
         setTimeout(() => {
           loadDemoStream();
         }, 2000);
         return;
       }
       
-      setStreamMode('hls');
-      
-      // Wait for stream conversion to initialize
-      setTimeout(() => {
-        loadHLSStream(data.hlsUrl);
-      }, 3000);
-      
     } catch (error) {
       console.error('RTSP stream error:', error);
       if (error.isDemoMode) {
         setStreamMode('demo');
-        setError('Backend server not available. Running in demo mode.');
+        setError('Backend server not available. RTSP streaming requires a backend server with FFmpeg support.');
         setTimeout(() => {
           loadDemoStream();
         }, 2000);
       } else {
-        setError(`RTSP stream failed: ${error.message}`);
+        setError(`RTSP stream failed: ${error.message || 'Unknown error occurred'}`);
         setStreamMode('error');
         setIsLoading(false);
       }
@@ -337,7 +354,18 @@ const RTSPPlayer: React.FC<RTSPPlayerProps> = ({
             <div className="text-center text-white max-w-md px-4">
               <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
               <h3 className="text-lg font-semibold mb-2">RTSP Stream Error</h3>
-              <p className="mb-4 text-sm">{error}</p>
+              <div className="mb-4 text-sm space-y-2">
+                <p>{error}</p>
+                <div className="text-xs text-gray-400 bg-gray-800 p-2 rounded">
+                  <p><strong>Common causes:</strong></p>
+                  <ul className="list-disc list-inside mt-1 space-y-1">
+                    <li>Environment doesn't support FFmpeg execution</li>
+                    <li>RTSP URL is not accessible</li>
+                    <li>Network connectivity issues</li>
+                    <li>Containerized environment restrictions</li>
+                  </ul>
+                </div>
+              </div>
               <div className="space-y-2">
                 <p className="text-xs text-gray-400">RTSP URL: {rtspUrl}</p>
                 <p className="text-xs text-gray-400">Retry attempts: {retryCount}/3</p>
@@ -354,7 +382,7 @@ const RTSPPlayer: React.FC<RTSPPlayerProps> = ({
                   onClick={loadDemoStream}
                   className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded transition-colors"
                 >
-                  Load Demo
+                  Use Demo Video
                 </button>
               </div>
             </div>
